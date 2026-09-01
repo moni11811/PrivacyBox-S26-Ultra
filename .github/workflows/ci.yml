@@ -1,0 +1,71 @@
+name: CI
+
+"on":
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Temurin JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17.0.20.1+1'
+          check-latest: false
+          cache: gradle
+
+      - name: Verify JDK identity
+        shell: bash
+        run: |
+          java -XshowSettings:properties -version 2> jdk.properties
+          grep -F 'java.version = 17.0.20.1' jdk.properties
+          grep -F 'java.vendor = Eclipse Adoptium' jdk.properties
+          rm jdk.properties
+
+      - name: Validate Gradle wrapper before execution
+        run: tools/verify_wrapper.sh
+
+      - name: Verify workflow input mediation
+        run: |
+          python3 -m unittest tools/test_verify_workflow_run_inputs.py
+          python3 tools/verify_workflow_run_inputs.py
+
+      - name: Scan repository history and working tree for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Verify exact third-party notices
+        run: python3 tools/verify_third_party_notices.py
+
+      - name: Test, lint, and assemble without changing locks or verification metadata
+        run: >-
+          ./gradlew --dependency-verification=strict
+          --no-daemon --no-configuration-cache
+          clean test lint assembleDebug assembleRelease assembleDebugAndroidTest
+
+      - name: Verify expected local artifacts
+        shell: bash
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          test -f app/build/outputs/apk/release/app-release-unsigned.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk

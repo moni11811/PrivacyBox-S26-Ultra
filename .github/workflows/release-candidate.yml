@@ -1,0 +1,428 @@
+name: Build signed release candidate
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Protected annotated v* source tag to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build verified unsigned candidate
+    environment: release-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ANDROID_BUILD_TOOLS_VERSION: '36.0.0'
+      GIT_ATTR_NOSYSTEM: '1'
+    outputs:
+      tag: ${{ steps.source_identity.outputs.tag }}
+      tag_object: ${{ steps.source_identity.outputs.tag_object }}
+      commit: ${{ steps.source_identity.outputs.commit }}
+      tree: ${{ steps.source_identity.outputs.tree }}
+      source_archive_sha256: ${{ steps.source_identity.outputs.source_archive_sha256 }}
+      unsigned_apk_sha256: ${{ steps.handoff_identity.outputs.unsigned_apk_sha256 }}
+    steps:
+      - name: Check out workflow source tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up pinned Temurin JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17.0.20.1+1'
+          check-latest: false
+          cache: gradle
+
+      - name: Validate source tag and record immutable source identity
+        id: source_identity
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          TAG="$SOURCE_TAG"
+          if [[ ! "$TAG" =~ ^v[0-9][0-9A-Za-z._+-]*$ ]]; then
+            echo "Invalid protected source tag." >&2
+            exit 1
+          fi
+          REF="refs/tags/$TAG"
+          test "$REF" = "$WORKFLOW_REF"
+          test "$REPOSITORY_PRIVATE" = true
+          git check-ref-format "$REF"
+          TAG_OBJECT="$(git rev-parse "$REF^{tag}")"
+          test "$(git cat-file -t "$TAG_OBJECT")" = tag
+          test "$(git cat-file -p "$TAG_OBJECT" | sed -n 's/^type //p' | head -1)" = commit
+          COMMIT="$(git rev-parse "$REF^{commit}")"
+          test "$COMMIT" = "$WORKFLOW_SHA"
+          test "$COMMIT" = "$(git rev-parse HEAD)"
+          TREE="$(git rev-parse "$COMMIT^{tree}")"
+          test "$TREE" = "$(git rev-parse HEAD^{tree})"
+          git diff --quiet "$COMMIT" --
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test ! -s .git/info/attributes
+          test -z "$(git config --global --get core.attributesFile || true)"
+          ATTR_HITS="$(
+            git ls-files -z |
+              git check-attr --stdin -z export-ignore export-subst |
+              python3 -c 'import sys; p=sys.stdin.buffer.read().split(b"\0"); print("\n".join(p[i].decode("utf-8","replace") for i in range(0,len(p)-2,3) if p[i+2] not in (b"unspecified",b"unset")))'
+          )"
+          test -z "$ATTR_HITS"
+          mkdir -p dist
+          printf 'tag=%s\ntag_object=%s\ncommit=%s\ntree=%s\n' \
+            "$TAG" "$TAG_OBJECT" "$COMMIT" "$TREE" > dist/SOURCE_IDENTITY.txt
+          git archive --format=tar --prefix="privacy-box-$TAG/" "$COMMIT" |
+            gzip -n > "dist/privacy-box-$TAG-source.tar.gz"
+          SOURCE_ARCHIVE_SHA256="$(sha256sum "dist/privacy-box-$TAG-source.tar.gz" | awk '{print $1}')"
+          {
+            printf 'tag=%s\n' "$TAG"
+            printf 'tag_object=%s\n' "$TAG_OBJECT"
+            printf 'commit=%s\n' "$COMMIT"
+            printf 'tree=%s\n' "$TREE"
+            printf 'source_archive_sha256=%s\n' "$SOURCE_ARCHIVE_SHA256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify workflow input mediation
+        run: python3 tools/verify_workflow_run_inputs.py
+
+      - name: Verify pinned Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" version
+
+      - name: Validate Gradle wrapper before execution
+        run: tools/verify_wrapper.sh
+
+      - name: Scan tagged source for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Enforce user-owned release decisions
+        run: tools/check_release_readiness.sh
+        env:
+          APPROVED_SIGNING_CERT_SHA256: ${{ secrets.APPROVED_SIGNING_CERT_SHA256 }}
+
+      - name: Revalidate protected source immediately before build
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ steps.source_identity.outputs.tag }}
+          SOURCE_TAG_OBJECT: ${{ steps.source_identity.outputs.tag_object }}
+          SOURCE_COMMIT: ${{ steps.source_identity.outputs.commit }}
+          SOURCE_TREE: ${{ steps.source_identity.outputs.tree }}
+        run: |
+          set -euo pipefail
+          SOURCE_REF="refs/tags/$SOURCE_TAG"
+          test "$(git rev-parse "$SOURCE_REF^{tag}")" = "$SOURCE_TAG_OBJECT"
+          test "$(git rev-parse "$SOURCE_REF^{commit}")" = "$SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --quiet "$SOURCE_COMMIT" --
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Test, lint, and build exact unsigned source
+        run: >-
+          ./gradlew --dependency-verification=strict
+          --no-daemon --no-configuration-cache
+          clean test lint assembleRelease
+
+      - name: Revalidate source and archive after build
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ steps.source_identity.outputs.tag }}
+          SOURCE_TAG_OBJECT: ${{ steps.source_identity.outputs.tag_object }}
+          SOURCE_COMMIT: ${{ steps.source_identity.outputs.commit }}
+          SOURCE_TREE: ${{ steps.source_identity.outputs.tree }}
+          SOURCE_ARCHIVE_SHA256: ${{ steps.source_identity.outputs.source_archive_sha256 }}
+        run: |
+          set -euo pipefail
+          SOURCE_REF="refs/tags/$SOURCE_TAG"
+          test "$(git rev-parse "$SOURCE_REF^{tag}")" = "$SOURCE_TAG_OBJECT"
+          test "$(git rev-parse "$SOURCE_REF^{commit}")" = "$SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --quiet "$SOURCE_COMMIT" --
+          test -z "$(git status --porcelain --untracked-files=all)"
+          grep -Fqx "tag=$SOURCE_TAG" dist/SOURCE_IDENTITY.txt
+          grep -Fqx "tag_object=$SOURCE_TAG_OBJECT" dist/SOURCE_IDENTITY.txt
+          grep -Fqx "commit=$SOURCE_COMMIT" dist/SOURCE_IDENTITY.txt
+          grep -Fqx "tree=$SOURCE_TREE" dist/SOURCE_IDENTITY.txt
+          test ! -L dist/SOURCE_IDENTITY.txt
+          test ! -L "dist/privacy-box-$SOURCE_TAG-source.tar.gz"
+          test "$(sha256sum "dist/privacy-box-$SOURCE_TAG-source.tar.gz" | awk '{print $1}')" = \
+            "$SOURCE_ARCHIVE_SHA256"
+          gzip -t "dist/privacy-box-$SOURCE_TAG-source.tar.gz"
+          test -f app/build/outputs/apk/release/app-release-unsigned.apk
+          test ! -L app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Bind unsigned APK and verified source for isolated signing
+        id: handoff_identity
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ steps.source_identity.outputs.tag }}
+          SOURCE_ARCHIVE_SHA256: ${{ steps.source_identity.outputs.source_archive_sha256 }}
+        run: |
+          set -euo pipefail
+          TAG="$SOURCE_TAG"
+          UNSIGNED_APK="dist/privacy-box-$TAG-unsigned.apk"
+          test ! -e "$UNSIGNED_APK"
+          test ! -L "$UNSIGNED_APK"
+          cp -n app/build/outputs/apk/release/app-release-unsigned.apk "$UNSIGNED_APK"
+          test -f "$UNSIGNED_APK"
+          test ! -L "$UNSIGNED_APK"
+          for destination in dist/THIRD_PARTY_NOTICES.md dist/Apache-2.0.txt; do
+            test ! -e "$destination"
+            test ! -L "$destination"
+          done
+          cp -n THIRD_PARTY_NOTICES.md dist/
+          cp -n third_party/licenses/Apache-2.0.txt dist/
+          cd dist
+          test "$(sha256sum "privacy-box-$TAG-source.tar.gz" | awk '{print $1}')" = \
+            "$SOURCE_ARCHIVE_SHA256"
+          sha256sum "privacy-box-$TAG-unsigned.apk" "privacy-box-$TAG-source.tar.gz" \
+            SOURCE_IDENTITY.txt THIRD_PARTY_NOTICES.md Apache-2.0.txt > HANDOFF_SHA256SUMS
+          sha256sum -c HANDOFF_SHA256SUMS
+          UNSIGNED_APK_SHA256="$(sha256sum "privacy-box-$TAG-unsigned.apk" | awk '{print $1}')"
+          printf 'unsigned_apk_sha256=%s\n' "$UNSIGNED_APK_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload private one-day unsigned signing handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: privacy-box-${{ steps.source_identity.outputs.tag }}-unsigned-handoff
+          path: |
+            dist/privacy-box-${{ steps.source_identity.outputs.tag }}-unsigned.apk
+            dist/privacy-box-${{ steps.source_identity.outputs.tag }}-source.tar.gz
+            dist/SOURCE_IDENTITY.txt
+            dist/THIRD_PARTY_NOTICES.md
+            dist/Apache-2.0.txt
+            dist/HANDOFF_SHA256SUMS
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 1
+
+  sign:
+    name: Sign on isolated protected runner
+    needs: build
+    environment: release-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ANDROID_BUILD_TOOLS_VERSION: '36.0.0'
+      GIT_ATTR_NOSYSTEM: '1'
+    steps:
+      - name: Check out trusted source identity without executing it
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          path: trusted-source
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up pinned Temurin JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17.0.20.1+1'
+          check-latest: false
+
+      - name: Download unsigned signing handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: privacy-box-${{ needs.build.outputs.tag }}-unsigned-handoff
+          path: handoff
+
+      - name: Independently verify source and unsigned handoff
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ needs.build.outputs.tag }}
+          SOURCE_TAG_OBJECT: ${{ needs.build.outputs.tag_object }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.commit }}
+          SOURCE_TREE: ${{ needs.build.outputs.tree }}
+          SOURCE_ARCHIVE_SHA256: ${{ needs.build.outputs.source_archive_sha256 }}
+          UNSIGNED_APK_SHA256: ${{ needs.build.outputs.unsigned_apk_sha256 }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          TAG="$SOURCE_TAG"
+          if [[ ! "$TAG" =~ ^v[0-9][0-9A-Za-z._+-]*$ ]]; then
+            echo "Invalid protected source tag." >&2
+            exit 1
+          fi
+          REF="refs/tags/$TAG"
+          test "$REF" = "$WORKFLOW_REF"
+          test "$REPOSITORY_PRIVATE" = true
+          git -C trusted-source check-ref-format "$REF"
+          test "$(git -C trusted-source rev-parse "$REF^{tag}")" = "$SOURCE_TAG_OBJECT"
+          test "$(git -C trusted-source cat-file -p "$SOURCE_TAG_OBJECT" | sed -n 's/^type //p' | head -1)" = commit
+          test "$(git -C trusted-source rev-parse "$REF^{commit}")" = "$SOURCE_COMMIT"
+          test "$SOURCE_COMMIT" = "$WORKFLOW_SHA"
+          test "$(git -C trusted-source rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(git -C trusted-source rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C trusted-source diff --quiet "$SOURCE_COMMIT" --
+          test -z "$(git -C trusted-source status --porcelain --untracked-files=all)"
+          test ! -s trusted-source/.git/info/attributes
+          test -z "$(git -C trusted-source config --global --get core.attributesFile || true)"
+          ATTR_HITS="$(
+            git -C trusted-source ls-files -z |
+              git -C trusted-source check-attr --stdin -z export-ignore export-subst |
+              python3 -c 'import sys; p=sys.stdin.buffer.read().split(b"\0"); print("\n".join(p[i].decode("utf-8","replace") for i in range(0,len(p)-2,3) if p[i+2] not in (b"unspecified",b"unset")))'
+          )"
+          test -z "$ATTR_HITS"
+          EXPECTED_FILES="$(
+            printf '%s\n' \
+              Apache-2.0.txt \
+              HANDOFF_SHA256SUMS \
+              SOURCE_IDENTITY.txt \
+              THIRD_PARTY_NOTICES.md \
+              "privacy-box-$TAG-source.tar.gz" \
+              "privacy-box-$TAG-unsigned.apk" |
+              LC_ALL=C sort
+          )"
+          ACTUAL_FILES="$(
+            python3 -c 'from pathlib import Path; print("\n".join(sorted(p.name for p in Path("handoff").iterdir())))'
+          )"
+          test "$ACTUAL_FILES" = "$EXPECTED_FILES"
+          test -z "$(find handoff -type l -print -quit)"
+          while IFS= read -r file; do
+            test -f "handoff/$file"
+            test ! -L "handoff/$file"
+          done <<< "$EXPECTED_FILES"
+          (
+            cd handoff
+            sha256sum -c HANDOFF_SHA256SUMS
+          )
+          test "$(sha256sum "handoff/privacy-box-$TAG-unsigned.apk" | awk '{print $1}')" = \
+            "$UNSIGNED_APK_SHA256"
+          test "$(sha256sum "handoff/privacy-box-$TAG-source.tar.gz" | awk '{print $1}')" = \
+            "$SOURCE_ARCHIVE_SHA256"
+          gzip -t "handoff/privacy-box-$TAG-source.tar.gz"
+          grep -Fqx "tag=$TAG" handoff/SOURCE_IDENTITY.txt
+          grep -Fqx "tag_object=$SOURCE_TAG_OBJECT" handoff/SOURCE_IDENTITY.txt
+          grep -Fqx "commit=$SOURCE_COMMIT" handoff/SOURCE_IDENTITY.txt
+          grep -Fqx "tree=$SOURCE_TREE" handoff/SOURCE_IDENTITY.txt
+          cmp -s trusted-source/THIRD_PARTY_NOTICES.md handoff/THIRD_PARTY_NOTICES.md
+          cmp -s trusted-source/third_party/licenses/Apache-2.0.txt handoff/Apache-2.0.txt
+          EXPECTED_SOURCE="$RUNNER_TEMP/privacy-box-expected-source.tar.gz"
+          git -C trusted-source archive --format=tar --prefix="privacy-box-$TAG/" "$SOURCE_COMMIT" |
+            gzip -n > "$EXPECTED_SOURCE"
+          test "$(sha256sum "$EXPECTED_SOURCE" | awk '{print $1}')" = "$SOURCE_ARCHIVE_SHA256"
+          cmp -s "$EXPECTED_SOURCE" "handoff/privacy-box-$TAG-source.tar.gz"
+          APKSIGNER="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" version
+
+      - name: Sign only from protected environment secrets
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ needs.build.outputs.tag }}
+          ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          APPROVED_SIGNING_CERT_SHA256: ${{ secrets.APPROVED_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          TAG="$SOURCE_TAG"
+          if [[ ! "$TAG" =~ ^v[0-9][0-9A-Za-z._+-]*$ ]]; then
+            echo "Invalid protected source tag." >&2
+            exit 1
+          fi
+          APKSIGNER="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner"
+          test -x "$APKSIGNER"
+          test -n "$ANDROID_RELEASE_KEYSTORE_B64"
+          test -n "$ANDROID_RELEASE_STORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$ANDROID_RELEASE_KEY_PASSWORD"
+          umask 077
+          KEYSTORE="$(mktemp "$RUNNER_TEMP/privacy-box-release.XXXXXX")"
+          CERT_INFO="$(mktemp "$RUNNER_TEMP/privacy-box-cert.XXXXXX")"
+          trap 'rm -f "$KEYSTORE" "$CERT_INFO"' EXIT
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          mkdir -m 700 candidate
+          APK="candidate/privacy-box-$TAG.apk"
+          test ! -e "$APK"
+          test ! -L "$APK"
+          "$APKSIGNER" sign \
+            --v4-signing-enabled false \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            --ks-pass env:ANDROID_RELEASE_STORE_PASSWORD \
+            --key-pass env:ANDROID_RELEASE_KEY_PASSWORD \
+            --out "$APK" \
+            "handoff/privacy-box-$TAG-unsigned.apk"
+          test -f "$APK"
+          test ! -L "$APK"
+          "$APKSIGNER" verify --verbose "$APK"
+          "$APKSIGNER" verify --print-certs "$APK" > "$CERT_INFO"
+          ACTUAL_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}' "$CERT_INFO")"
+          EXPECTED_CERT="$(printf '%s' "$APPROVED_SIGNING_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':')"
+          test "$ACTUAL_CERT" = "$EXPECTED_CERT"
+
+      - name: Bind signed APK and independently verified source
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ needs.build.outputs.tag }}
+          SOURCE_ARCHIVE_SHA256: ${{ needs.build.outputs.source_archive_sha256 }}
+        run: |
+          set -euo pipefail
+          TAG="$SOURCE_TAG"
+          cp -n "handoff/privacy-box-$TAG-source.tar.gz" candidate/
+          cp -n handoff/SOURCE_IDENTITY.txt candidate/
+          cp -n handoff/THIRD_PARTY_NOTICES.md candidate/
+          cp -n handoff/Apache-2.0.txt candidate/
+          cd candidate
+          EXPECTED_FILES="$(
+            printf '%s\n' \
+              Apache-2.0.txt \
+              SOURCE_IDENTITY.txt \
+              THIRD_PARTY_NOTICES.md \
+              "privacy-box-$TAG-source.tar.gz" \
+              "privacy-box-$TAG.apk" |
+              LC_ALL=C sort
+          )"
+          ACTUAL_FILES="$(
+            python3 -c 'from pathlib import Path; print("\n".join(sorted(p.name for p in Path(".").iterdir())))'
+          )"
+          test "$ACTUAL_FILES" = "$EXPECTED_FILES"
+          test -z "$(find . -type l -print -quit)"
+          test "$(sha256sum "privacy-box-$TAG-source.tar.gz" | awk '{print $1}')" = \
+            "$SOURCE_ARCHIVE_SHA256"
+          gzip -t "privacy-box-$TAG-source.tar.gz"
+          sha256sum "privacy-box-$TAG.apk" "privacy-box-$TAG-source.tar.gz" \
+            SOURCE_IDENTITY.txt THIRD_PARTY_NOTICES.md Apache-2.0.txt > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Upload private short-retention candidate bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: privacy-box-${{ needs.build.outputs.tag }}-candidate
+          path: |
+            candidate/privacy-box-${{ needs.build.outputs.tag }}.apk
+            candidate/privacy-box-${{ needs.build.outputs.tag }}-source.tar.gz
+            candidate/SOURCE_IDENTITY.txt
+            candidate/THIRD_PARTY_NOTICES.md
+            candidate/Apache-2.0.txt
+            candidate/SHA256SUMS
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7

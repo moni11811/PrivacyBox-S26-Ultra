@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="privacy_overlay.xml" />
+    <exclude domain="sharedpref" path="overlay_start_authorization.xml" />
+</full-backup-content>
