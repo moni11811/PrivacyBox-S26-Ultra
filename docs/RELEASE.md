@@ -7,7 +7,7 @@ This repository contains a prepared, non-publishing release-candidate workflow. 
 - Gradle wrapper and distribution: 9.1.0.
 - Official wrapper JAR SHA-256: 76805e32c009c0cf0dd5d206bddc9fb22ea42e84db904b764f3047de095493f3.
 - Official binary distribution SHA-256: a17ddd85a26b6a7f5ddb71ff8b05fc5104c0202c6e64782429790c933686c806.
-- CI JDK: Eclipse Temurin 17.0.20.1+1.
+- CI JDK: Eclipse Temurin 17.0.20+8 (runtime `java.version` 17.0.20).
 - Android Build Tools and apksigner: 36.0.0, selected by an exact path and checked before secrets are used.
 - Runtime dependencies: strict Gradle locks plus SHA-256 dependency verification metadata.
 - GitHub Actions: immutable full commit SHA pins with version comments.

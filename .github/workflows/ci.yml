@@ -27,7 +27,7 @@ jobs:
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
-          java-version: '17.0.20.1+1'
+          java-version: '17.0.20+8'
           check-latest: false
           cache: gradle
 
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           java -XshowSettings:properties -version 2> jdk.properties
-          grep -F 'java.version = 17.0.20.1' jdk.properties
+          grep -F 'java.version = 17.0.20' jdk.properties
           grep -F 'java.vendor = Eclipse Adoptium' jdk.properties
           rm jdk.properties
 
