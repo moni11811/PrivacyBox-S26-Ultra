@@ -10,8 +10,8 @@ android {
         applicationId = "com.moni11811.privacybox"
         minSdk = 36
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
