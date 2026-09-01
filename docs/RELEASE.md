@@ -11,6 +11,8 @@ This repository contains a prepared, non-publishing release-candidate workflow. 
 - Android Build Tools and apksigner: 36.0.0, selected by an exact path and checked before secrets are used.
 - Runtime dependencies: strict Gradle locks plus SHA-256 dependency verification metadata.
 - GitHub Actions: immutable full commit SHA pins with version comments.
+- Release signing owner: `moni11811`; key alias: `privacybox-release`.
+- Approved release certificate SHA-256: `f707875a17cfd534f12b4d18479e14b6321e42226a05a9c2d7ec1d7bb2a74306`.
 
 Official references:
 
@@ -43,7 +45,7 @@ Before enabling it:
 - replace the legal-owner placeholders only with verified user-provided identity;
 - complete and approve ARTWORK_PROVENANCE.md from the template;
 - preserve the selected permanent application ID `com.moni11811.privacybox` and review any future package-owned identifier changes;
-- select the signing owner and approved certificate SHA-256;
+- preserve the `moni11811` signing owner and independently verify the approved certificate SHA-256 above;
 - configure the private CLA intake/registry and required CLA/DCO checks;
 - obtain legal review of the license, CLA, notices, and artwork rights.
 

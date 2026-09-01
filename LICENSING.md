@@ -26,7 +26,7 @@ The CLA binds only contributors whose contributions the project accepts under th
 - Configure branch protection so pull requests cannot merge until CLA status and DCO sign-off have been checked.
 - Preserve the completed app-icon rights record in `ARTWORK_PROVENANCE.md` and its license notice in `NOTICE.md`.
 - Review the exact locked dependency inventory and bundled license copy in `THIRD_PARTY_NOTICES.md`; dependency hashes do not establish legal sufficiency.
-- Preserve the permanent application ID `com.moni11811.privacybox`, select the signing owner, and configure the protected release process in `docs/RELEASE.md`.
+- Preserve the permanent application ID `com.moni11811.privacybox` and the `moni11811` signing identity recorded in `docs/RELEASE.md`.
 
 ## Primary references
 

@@ -57,7 +57,7 @@ This repository is not ready for public release. The following remain user-owned
 1. verified legal owner text for CLA.md and NOTICE.md;
 2. completed and approved artwork provenance and rights;
 3. preservation of the permanent application ID `com.moni11811.privacybox`;
-4. the signing owner, provisioned keystore, and approved public certificate SHA-256;
+4. continued protection of the `moni11811` release keystore and approved certificate SHA-256 recorded in `docs/RELEASE.md`;
 5. actual CLA/DCO intake, enforcement, and required-check choices;
 6. a standalone private GitHub repository with verified protected release-tag rules, workflow-dispatch authorization, environment reviewers, self-review prevention, and secret provisioning;
 7. legal review of AGPL, CLA, notices, and artwork rights;
