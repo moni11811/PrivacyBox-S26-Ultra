@@ -37,4 +37,4 @@ Each pull request must state:
 - whether new permissions, exported components, network access, telemetry, or third-party dependencies were added; and
 - whether every commit has a DCO sign-off and the contributor's CLA is on file.
 
-The repository does not yet have a verified owner or configured CLA/DCO gate. These statements describe the intended future contribution process and are not evidence that enforcement exists.
+The verified project owner is `moni11811`. Automated CLA/DCO enforcement is not configured, so contributions must not be merged until the owner has privately confirmed the CLA record and every commit has a valid DCO sign-off.

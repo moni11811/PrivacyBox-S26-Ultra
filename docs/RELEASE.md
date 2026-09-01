@@ -1,6 +1,6 @@
 # Release-candidate process
 
-This repository contains a prepared, non-publishing release-candidate workflow. It is intentionally blocked until the user-owned identity, artwork, package-name, signing, and GitHub controls below are resolved.
+This public repository contains the source for the signed v1.0.5 release. The release-candidate workflow is deliberately non-publishing and private-staging-only: it produced and verified the signed candidate before the repository became public, after which the allowlisted release bundle was published separately.
 
 ## Pinned build inputs
 
@@ -38,16 +38,16 @@ The CI workflow performs these gates without regenerating trust metadata:
 
 The release-candidate workflow is manual and must itself be dispatched from the same protected annotated tag named by source_tag. The repository must still be private. The workflow never creates a GitHub Release, publishes a package, or uploads to Play.
 
-Before enabling it:
+The v1.0.5 release used this configuration:
 
-- create the standalone repository and protect release tags;
-- configure the release-candidate environment with required reviewer approval;
-- replace the legal-owner placeholders only with verified user-provided identity;
-- complete and approve ARTWORK_PROVENANCE.md from the template;
+- standalone repository `moni11811/PrivacyBox-S26-Ultra` with protected `v*` tags and protected main history;
+- release-candidate environment secrets with `moni11811` as the required reviewer;
+- verified public owner identity `moni11811` in the owner, license, and contribution records;
+- completed and approved `ARTWORK_PROVENANCE.md` for the ChatGPT-generated icon;
 - preserve the selected permanent application ID `com.moni11811.privacybox` and review any future package-owned identifier changes;
 - preserve the `moni11811` signing owner and independently verify the approved certificate SHA-256 above;
-- configure the private CLA intake/registry and required CLA/DCO checks;
-- obtain legal review of the license, CLA, notices, and artwork rights.
+- private CLA record confirmation and DCO sign-off checks before accepting contributions;
+- owner review of the license, CLA, notices, and artwork declaration; no independent legal opinion is claimed.
 
 Protected environment secret names:
 
@@ -62,7 +62,7 @@ The raw dispatch tag is passed into Bash only through an environment variable. B
 
 The build job uploads an explicit, checksum-bound one-day unsigned handoff. A fresh environment-protected signing job executes no checked-out repository code: it independently checks out the protected tag, recreates and byte-compares Corresponding Source, rejects extra files and symlinks, and revalidates every identity and digest before receiving signing secrets. It decodes the keystore only to a randomized runner-temporary file, keeps passwords in environment-backed apksigner inputs, selects Build Tools 36.0.0 by exact path, and verifies the approved public certificate digest without logging certificate identity. The final seven-day artifact is an explicit allowlist containing only the signed APK, matching source, identity, notices, license, and checksums.
 
-The candidate workflow fails if the repository is public. GitHub Actions artifacts expire and are not a public Corresponding Source distribution. A later authorized release must publish the APK, checksums, notices, and matching Corresponding Source together, preferably under protected immutable release settings.
+The candidate workflow fails if the repository is public, so future signed candidates require the same private-staging procedure or a separately reviewed workflow-policy change. Temporary Actions artifacts were deleted after v1.0.5 verification. The public GitHub Release contains only the signed APK, checksums, source identity, matching Corresponding Source, notices, and Apache license under the protected immutable tag.
 
 ## Local verification
 

@@ -51,7 +51,7 @@ Grant the appear-on-top permission from the app, then enable the Privacy Box Qui
 
 See [SECURITY.md](SECURITY.md) for reporting instructions and [docs/SECURITY_ALIGNMENT.md](docs/SECURITY_ALIGNMENT.md) for the current Android security review. The overlay permission is powerful; install only builds you trust. Backup is disabled, and both Android backup-rule formats explicitly exclude the geometry, lock, error, and one-shot permission-flow preferences.
 
-The public-release path is prepared but intentionally blocked. See [docs/RELEASE.md](docs/RELEASE.md) for exact wrapper, dependency, JDK, signing, tag, checksum, and Corresponding Source controls.
+The latest signed APK and its exact matching source, checksums, notices, and license bundle are available from the [v1.0.5 release](https://github.com/moni11811/PrivacyBox-S26-Ultra/releases/tag/v1.0.5). See [docs/RELEASE.md](docs/RELEASE.md) for the wrapper, dependency, JDK, signing, tag, checksum, and Corresponding Source controls used to produce it.
 
 ## License and contributions
 

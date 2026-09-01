@@ -2,7 +2,7 @@
 
 Review date: 2026-09-01
 
-Scope: the current Privacy Box Android source, generated release manifest, build-integrity controls, and private release-candidate workflow. This is defensive source review and verification, not a penetration-test certification, legal opinion, or guarantee of Samsung firmware behavior.
+Scope: the current Privacy Box Android source, generated release manifest, build-integrity controls, verified private v1.0.5 candidate, and public release bundle. This is defensive source review and verification, not a penetration-test certification, legal opinion, or guarantee of Samsung firmware behavior.
 
 ## Current Android controls
 
@@ -19,7 +19,7 @@ Scope: the current Privacy Box Android source, generated release manifest, build
 
 The post-Daybreak audit's medium finding was valid: workflow_dispatch source_tag was expanded directly into Bash, including the secret-bearing signing step. Shell parsing happened before the version regex, and the mutable checkout could diverge from the tag archive.
 
-The current private candidate workflow closes that path:
+The private v1.0.5 candidate workflow closed that path before publication:
 
 - the raw input appears once, as the SOURCE_TAG environment binding for the first validator, and never inside a run scalar;
 - the workflow must itself be dispatched from the same exact refs/tags reference, in a private repository, so environment tag rules apply to the source being built;
@@ -41,7 +41,7 @@ The deterministic verifier scans workflow and local composite-action run scalars
 - Dependency locking is strict and verification metadata contains SHA-256 hashes.
 - THIRD_PARTY_NOTICES.md must equal the 35-coordinate release runtime lock graph.
 - CI and candidate actions use full commit SHA pins, read-only repository permissions, and checkout without persisted credentials.
-- Release readiness fails closed on unresolved owner, artwork, application-ID, and certificate inputs.
+- Release readiness passed only after owner, artwork, application-ID, and approved certificate inputs were verified.
 
 ## Deliberate non-findings and limitations
 
@@ -50,17 +50,17 @@ The deterministic verifier scans workflow and local composite-action run scalars
 - No online dependency-vulnerability review was completed by these local integrity checks.
 - Repository source cannot prove optical privacy on every Samsung firmware build.
 
-## Publication blockers
+## Published release status and residual limitations
 
-This repository is not ready for public release. The following remain user-owned or external:
+The signed v1.0.5 release is public under protected tag `v1.0.5`. Its APK, checksums, source identity, exact matching AGPL Corresponding Source, runtime notices, and Apache license were independently read back from the public GitHub surface. The release certificate matches the approved digest in `docs/RELEASE.md`.
 
-1. verified legal owner text for CLA.md and NOTICE.md;
-2. completed and approved artwork provenance and rights;
-3. preservation of the permanent application ID `com.moni11811.privacybox`;
-4. continued protection of the `moni11811` release keystore and approved certificate SHA-256 recorded in `docs/RELEASE.md`;
-5. actual CLA/DCO intake, enforcement, and required-check choices;
-6. a standalone private GitHub repository with verified protected release-tag rules, workflow-dispatch authorization, environment reviewers, self-review prevention, and secret provisioning;
-7. legal review of AGPL, CLA, notices, and artwork rights;
-8. an online dependency/advisory review appropriate to the eventual release date.
+Residual limitations remain explicit:
+
+1. the private release keystore and macOS Keychain passwords must remain protected and recoverable;
+2. automated CLA/DCO enforcement is not configured, so owner confirmation is required before merging contributions;
+3. no independent legal opinion is claimed for the AGPL, CLA, notices, or artwork declaration;
+4. dependency integrity is pinned and verified, but future releases still require a current advisory review;
+5. exact optical privacy remains a Samsung firmware and physical-device property, not a source-code certification;
+6. the hardened candidate workflow intentionally requires private staging and cannot be rerun while this repository is public without a separately reviewed policy change.
 
 AGPL Corresponding Source obligations apply to this program and its distribution. They do not claim control over independently written clean-room software merely because it calls a Samsung API.
